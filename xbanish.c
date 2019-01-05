@@ -38,6 +38,8 @@
 #include <X11/extensions/Xfixes.h>
 #include <X11/extensions/XInput.h>
 #include <X11/extensions/XInput2.h>
+#include <X11/cursorfont.h>
+#include <X11/Xcursor/Xcursor.h>
 
 void hide_cursor(void);
 void show_cursor(void);
@@ -49,6 +51,7 @@ int swallow_error(Display *, XErrorEvent *);
 /* xinput event type ids to be filled in later */
 static int button_press_type = -1;
 static int button_release_type = -1;
+static int key_press_type = -1;
 static int key_release_type = -1;
 static int motion_type = -1;
 
@@ -97,6 +100,11 @@ main(int argc, char *argv[])
 	if (!(dpy = XOpenDisplay(NULL)))
 		errx(1, "can't open display %s", XDisplayName(NULL));
 
+#ifdef __OpenBSD__
+	if (pledge("stdio", NULL) == -1)
+		err(1, "pledge");
+#endif
+
 	XSetErrorHandler(swallow_error);
 
 	if (snoop_xinput(DefaultRootWindow(dpy)) == 0) {
@@ -113,12 +121,10 @@ main(int argc, char *argv[])
 		XNextEvent(dpy, &e);
 
 		int etype = e.type;
-		unsigned int keycode;
-		unsigned int state;
-
 		if (e.type == motion_type)
 			etype = MotionNotify;
-		else if (e.type == key_release_type)
+		else if (e.type == key_press_type ||
+		    e.type == key_release_type)
 			etype = KeyRelease;
 		else if (e.type == button_press_type ||
 		    e.type == button_release_type)
@@ -126,23 +132,16 @@ main(int argc, char *argv[])
 
 		switch (etype) {
 		case KeyRelease:
-			if (legacy) {
-				keycode = e.xkey.keycode;
-				state = e.xkey.state;
-			} else {
-				/* If xinput extension is used, the event struct
-				 * needs to be casted properly to get the correct
-				 * keycode/state
-				 */
-				XDeviceKeyEvent *de = (XDeviceKeyEvent *)&e;
-				keycode = de->keycode;
-				state = de->state;
+			if (debug) {
+				printf("got keyrelease\n"); fflush(stdout);
 			}
 
-			if (ignored && (state & ignored)) {
-				if (debug)
+			if (ignored && (e.xkey.state & ignored)) {
+				if (debug) {
 					printf("ignoring keystroke %d\n",
-					    keycode);
+					    e.xkey.keycode);
+					fflush(stdout);
+				}
 				break;
 			}
 
@@ -156,9 +155,11 @@ main(int argc, char *argv[])
 
 		case CreateNotify:
 			if (legacy) {
-				if (debug)
+				if (debug) {
 					printf("created new window, "
 					    "snooping on it\n");
+					fflush(stdout);
+				}
 
 				/* not sure why snooping directly on the window
 				 * doesn't work, so snoop on all windows from
@@ -182,43 +183,62 @@ main(int argc, char *argv[])
 				break;
 
 			default:
-				if (debug)
+				if (debug) {
 					printf("unknown XI event type %d\n",
 					    xie->evtype);
+					fflush(stdout);
+				}
 			}
 
 			XFreeEventData(dpy, cookie);
 			break;
 
 		default:
-			if (debug)
+			if (debug) {
 				printf("unknown event type %d\n", e.type);
+				fflush(stdout);
+			}
 		}
 	}
 }
 
 void
-hide_cursor()
+hide_cursor(void)
 {
-	if (debug)
-		printf("keystroke, %shiding cursor\n",
-		    (hiding ? "already " : ""));
-
 	if (!hiding) {
-		XFixesHideCursor(dpy, DefaultRootWindow(dpy));
+		if (debug) {
+			printf("keystroke, %shiding cursor\n",
+					(hiding ? "already " : ""));
+			fflush(stdout);
+		}
+
+		int size = XcursorGetDefaultSize(dpy);
+		const char *theme = XcursorGetTheme(dpy);
+		printf("%s\n", theme);
+		XcursorImage *img = XcursorLibraryLoadImage("help", theme, size);
+		Cursor cursor = XcursorImageLoadCursor(dpy, img);
+		int en = XDefineCursor(dpy, XDefaultRootWindow(dpy), cursor);
+		/*
+		char text[128];
+		XGetErrorText(dpy, en, text, 128);
+		printf("%s\n", text);
+		*/
+		//XFixesHideCursor(dpy, DefaultRootWindow(dpy));
 		hiding = 1;
 	}
 }
 
 void
-show_cursor()
+show_cursor(void)
 {
-	if (debug)
+	if (debug) {
 		printf("mouse moved, %sunhiding cursor\n",
 		    (hiding ? "" : "already "));
+		fflush(stdout);
+	}
 
 	if (hiding) {
-		XFixesShowCursor(dpy, DefaultRootWindow(dpy));
+		//XFixesShowCursor(dpy, DefaultRootWindow(dpy));
 		hiding = 0;
 	}
 }
@@ -265,8 +285,10 @@ snoop_xinput(Window win)
 
 		rawmotion = 1;
 
-		if (debug)
+		if (debug) {
 			printf("using xinput2 raw motion events\n");
+			fflush(stdout);
+		}
 	}
 
 	devinfo = XListInputDevices(dpy, &numdevs);
@@ -283,11 +305,15 @@ snoop_xinput(Window win)
 		ici++, j++) {
 			switch (ici->input_class) {
 			case KeyClass:
-				if (debug)
+				if (debug) {
 					printf("attaching to keyboard device "
 					    "%s (use %d)\n", devinfo[i].name,
 					    devinfo[i].use);
+					fflush(stdout);
+				}
 
+				DeviceKeyPress(device, key_press_type,
+				    event_list[ev]); ev++;
 				DeviceKeyRelease(device, key_release_type,
 				    event_list[ev]); ev++;
 				break;
@@ -296,10 +322,12 @@ snoop_xinput(Window win)
 				if (rawmotion)
 					continue;
 
-				if (debug)
+				if (debug) {
 					printf("attaching to buttoned device "
 					    "%s (use %d)\n", devinfo[i].name,
 					    devinfo[i].use);
+					fflush(stdout);
+				}
 
 				DeviceButtonPress(device, button_press_type,
 				    event_list[ev]); ev++;
@@ -311,10 +339,12 @@ snoop_xinput(Window win)
 				if (rawmotion)
 					continue;
 
-				if (debug)
+				if (debug) {
 					printf("attaching to pointing device "
 					    "%s (use %d)\n", devinfo[i].name,
 					    devinfo[i].use);
+					fflush(stdout);
+				}
 
 				DeviceMotionNotify(device, motion_type,
 				    event_list[ev]); ev++;
@@ -383,9 +413,6 @@ swallow_error(Display *d, XErrorEvent *e)
 	else if (e->error_code & FirstExtensionError)
 		/* error requesting input on a particular xinput device */
 		return 0;
-	else {
-		fprintf(stderr, "%s: got X error %d\n", __progname,
-			e->error_code);
-		exit(1);
-	}
+	else
+		errx(1, "got X error %d", e->error_code);
 }

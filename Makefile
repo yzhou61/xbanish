@@ -3,19 +3,19 @@
 VERS	:= 1.4
 
 CC	?= cc
-CFLAGS	?= -O2 -Wall -Wunused -Wmissing-prototypes -Wstrict-prototypes
+CFLAGS	?= -O0 -g -Wall -Wunused -Wmissing-prototypes -Wstrict-prototypes
 
 PREFIX	?= /usr/local
 BINDIR	?= $(DESTDIR)$(PREFIX)/bin
 MANDIR	?= $(DESTDIR)$(PREFIX)/man/man1
 
-INSTALL_PROGRAM ?= install -s
+INSTALL_PROGRAM ?= install
 INSTALL_DATA ?= install
 
 X11BASE	?= /usr/X11R6
 INCLUDES?= -I$(X11BASE)/include
 LDPATH	?= -L$(X11BASE)/lib
-LIBS	+= -lX11 -lXfixes -lXi
+LIBS	+= -lX11 -lXfixes -lXi -lXcursor
 
 PROG	= xbanish
 OBJS	= xbanish.o
